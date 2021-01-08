@@ -7,45 +7,46 @@ package levelup
 //       here. This will enable us to support the variety of key types we want
 //       such as CACHE, IMMUTABLE, DOCUMENT, BYTES, SPECIAL keys.
 func (self *Database) Put(k key, value []byte) error {
+	self.Access.Lock()
+	defer self.Access.Unlock()
 	return self.storage.Set(k.Bytes(), value)
 }
 
 func (self *Database) Get(k key) ([]byte, error) {
+	self.Access.Lock()
+	defer self.Access.Unlock()
 	return self.storage.Get(k.Bytes())
 }
 
 func (self *Database) Delete(k key) error {
+	self.Access.Lock()
+	defer self.Access.Unlock()
 	return self.storage.Delete(k.Bytes())
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//func (self *Database) PutObject(key string, value interface{}) error {
-//	if validations.IsEmpty(key) {
-//		return errors.ErrEmptyKey
-//	} else {
-//		data, err := self.Codec.Encode(value)
-//		//data = self.Codec.Compress(data)
-//		if validations.NoNil(err) {
-//			return err
-//		}
-//		return self.Put(key, data)
-//	}
-//	return nil
-//}
-//
-//func (self *Database) GetObject(key string, value interface{}) error {
-//	if validations.IsEmpty(key) {
-//		return errors.ErrEmptyKey
-//	} else {
-//		data, err := self.Get(key)
-//		if err != nil {
-//			return err
-//		}
-//
-//		err = self.Codec.Decode(data, &value)
-//		if err != nil {
-//			return err
-//		}
-//		return nil
-//	}
-//}
+func (self *Database) PutObject(k key, value interface{}) error {
+	self.Access.Lock()
+	defer self.Access.Unlock()
+	data, err := self.Codec.Encode(value)
+	//data = self.Codec.Compress(data)
+	if err != nil {
+		return err
+	}
+	return self.storage.Set(k.Bytes(), data)
+}
+
+func (self *Database) GetObject(key key, value interface{}) error {
+	self.Access.Lock()
+	defer self.Access.Unlock()
+	data, err := self.storage.Get(key.Bytes())
+	if err != nil {
+		return err
+	}
+
+	err = self.Codec.Decode(data, &value)
+	if err != nil {
+		return err
+	}
+	return nil
+}

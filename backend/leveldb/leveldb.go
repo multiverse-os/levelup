@@ -1,15 +1,9 @@
 package leveldb
 
 import (
-	"context"
 	"fmt"
-	"log"
-	"runtime"
 	"sync"
-	"sync/atomic"
-	"time"
 
-	codec "github.com/multiverse-os/codec"
 	errors "github.com/multiverse-os/levelup/errors"
 
 	leveldb "github.com/syndtr/goleveldb/leveldb"
@@ -69,21 +63,7 @@ type Database struct {
 	Store *leveldb.DB
 
 	Options Options
-
-	Codec codec.Codec
-
-	//RootKey    []byte
-	//SessionKey []byte
-
-	Access   sync.Mutex
-	throttle time.Duration // Disk throttling to prevent a heavy upgrade from hogging resources
-	log      log.Logger
-
-	active    uint32          // Flag whether the event loop was started
-	update    chan struct{}   // Notification channel that headers should be processed
-	quit      chan chan error // Quit channel to tear down running goroutines
-	ctx       context.Context
-	ctxCancel func()
+	Access  sync.Mutex
 	// TODO: Ability to Subscribe to changes
 	// TODO: Hooks on GET, SET, DELETE actions
 }
@@ -114,57 +94,34 @@ func FileStorage(path string) (database Database, err error) {
 				Filter:                        filter.NewBloomFilter(10),
 				CompactionTotalSizeMultiplier: 20,
 				BlockCacheCapacity:            0,
-				// MaxFileSize:                   (8 * opt.MiB),
-				// MaxOpenFiles:                  1,
-				// CreateIfMissing:               opt.CreateIfMissing,
-				// ErrorIfExists:                 opt.ErrorIfExists,
-				// Level0StopWriteFiles: 0,
-				// Level0SlowdownWriteFiles: 0,
-				// Level0CompactionFiles: 0,
-				// IterationBytesPerSampleSeek: 0,
-				// MinimalAllowedOverlapSeeks: 0,
-				// CompactionBytesPerSeek: 0,
-				// CompactionConcurrency: 0,
-				// BlockCompressionRatio: 0.00,
-				// BlockRestartInterval: 0,
-				// BlockSize: 0,
-				// MaxGrandparentOverlapBytes: 0,
-				// Comparator: nil,
-				// Logger: nil,
 				// TODO: Can use this to specify a virtual filesystem for greater
 				//       security.
+				// Comparator: nil,
+				// Logger: nil,
 				// FileSystem: opts.getFileSystem(),
 			},
 			Read: &opt.ReadOptions{
 				DontFillCache: true,
-				// TODO: Why is this erroring?
-				//VerifyChecksums: false,
 			},
 			Write: &opt.WriteOptions{
 				Sync: true,
 			},
 		},
 	}
-
 	database.Store, err = leveldb.OpenFile(path, database.Options.Runtime)
-	database.update = make(chan struct{}, 1)
-	database.quit = make(chan chan error)
-	database.ctx, database.ctxCancel = context.WithCancel(context.Background())
-
-	//go database.UpdateLoop()
 
 	// TODO: Read up more on finalizers
 	// runtime.SetFinalizer(database, (Database).finalize)
 	return database, err
 }
 
+//func (self Database) finalize() {
+//	go self.Store.Close()
+//}
+
 // SetReadOnly makes DB read-only. It will stay read-only until reopened.
 func (self Database) SetReadOnly() error {
 	return self.Store.SetReadOnly()
-}
-
-func (self Database) finalize() {
-	go self.Store.Close()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -196,90 +153,8 @@ func (self Database) finalize() {
 //}
 
 ////////////////////////////////////////////////////////////////////////////////
-func (self Database) WriteLoop() {
-	var (
-		updating bool
-		updated  time.Time
-		err      error
-	)
-
-	for {
-		select {
-		case errc := <-self.quit:
-			// Chain indexer terminating, report no failure and abort
-			errc <- nil
-			return
-
-		case <-self.update:
-			// Section headers completed (or rolled back), update the index
-			self.Access.Lock()
-			if time.Since(updated) > 8*time.Second {
-				updated = time.Now()
-			}
-			self.Access.Unlock()
-			if err != nil {
-				select {
-				case <-self.ctx.Done():
-					<-self.quit <- nil
-					return
-				default:
-				}
-			}
-			self.Access.Lock()
-
-			// If processing succeeded and no reorgs occurred, mark the section completed
-			if err == nil {
-				if updating {
-					updating = false
-				}
-			} else {
-				// If processing failed, don't retry until further notification
-			}
-			// If there are still further sections to process, reschedule
-			time.AfterFunc(self.throttle, func() {
-				select {
-				case self.update <- struct{}{}:
-				default:
-				}
-			})
-		}
-		self.Access.Unlock()
-	}
-}
-
-////////////////////////////////////////////////////////////////////////////////
 func (self Database) Close() error {
-	var errs []error
-
-	self.ctxCancel()
-
-	//// Tear down the primary update loop
-	errc := make(chan error)
-	self.quit <- errc
-	if err := <-errc; err != nil {
-		errs = append(errs, err)
-	}
-	//// If needed, tear down the secondary event loop
-	if atomic.LoadUint32(&self.active) != 0 {
-		self.quit <- errc
-		if err := <-errc; err != nil {
-			errs = append(errs, err)
-		}
-	}
-	//// Return any failures
-	switch {
-	case len(errs) == 0:
-		return nil
-	case len(errs) == 1:
-		return errs[0]
-	default:
-		return fmt.Errorf("%v", errs)
-	}
-
-	runtime.SetFinalizer(self, nil)
-	err := self.Store.Close()
-	self.Store = nil
-	return err
+	return self.Store.Close()
 }
 
 ////////////////////////////////////////////////////////////////////////////////

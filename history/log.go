@@ -15,7 +15,7 @@ const (
 	Cache
 )
 
-type Log struct {
+type ActionLog struct {
 	CreatedAt time.Time
 
 	Record *model.Record

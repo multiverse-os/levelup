@@ -11,7 +11,6 @@ import (
 
 	codec "github.com/multiverse-os/codec"
 	errors "github.com/multiverse-os/levelup/errors"
-	validations "github.com/multiverse-os/levelup/model/validations"
 
 	leveldb "github.com/syndtr/goleveldb/leveldb"
 	filter "github.com/syndtr/goleveldb/leveldb/filter"
@@ -300,17 +299,13 @@ func (self Database) Has(key []byte) bool {
 
 ////////////////////////////////////////////////////////////////////////////////
 func (self Database) Get(key []byte) ([]byte, error) {
-	if validations.IsEmpty(key) {
-		return []byte{}, errors.ErrEmptyKey
-	} else {
-		return self.Store.Get(key, nil)
-	}
+	return self.Store.Get(key, nil)
 }
 
 func (self Database) Set(key []byte, value []byte) error {
-	if validations.IsEmpty(key) {
+	if len(key) == 0 {
 		return errors.ErrEmptyKey
-	} else if validations.IsEmpty(value) {
+	} else if len(value) == 0 {
 		return self.Store.Delete(key, nil)
 	} else {
 		return self.Store.Put(key, value, self.Options.Write)
@@ -319,11 +314,7 @@ func (self Database) Set(key []byte, value []byte) error {
 
 ////////////////////////////////////////////////////////////////////////////////
 func (self Database) Delete(key []byte) error {
-	if validations.IsEmpty(key) {
-		return errors.ErrEmptyKey
-	} else {
-		return self.Store.Delete(key, nil)
-	}
+	return self.Store.Delete(key, nil)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -339,7 +330,7 @@ func (self Database) WriteBatch(data map[string][]byte) error {
 	batch := &leveldb.Batch{}
 	for key, value := range data {
 		keyBytes := []byte(key)
-		if validations.NotNil(value) {
+		if value != nil {
 			batch.Delete(keyBytes)
 		} else {
 			batch.Put(keyBytes, value)

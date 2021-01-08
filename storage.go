@@ -17,3 +17,35 @@ func (self *Database) Get(k key) ([]byte, error) {
 func (self *Database) Delete(k key) error {
 	return self.storage.Delete(k.Bytes())
 }
+
+////////////////////////////////////////////////////////////////////////////////
+//func (self *Database) PutObject(key string, value interface{}) error {
+//	if validations.IsEmpty(key) {
+//		return errors.ErrEmptyKey
+//	} else {
+//		data, err := self.Codec.Encode(value)
+//		//data = self.Codec.Compress(data)
+//		if validations.NoNil(err) {
+//			return err
+//		}
+//		return self.Put(key, data)
+//	}
+//	return nil
+//}
+//
+//func (self *Database) GetObject(key string, value interface{}) error {
+//	if validations.IsEmpty(key) {
+//		return errors.ErrEmptyKey
+//	} else {
+//		data, err := self.Get(key)
+//		if err != nil {
+//			return err
+//		}
+//
+//		err = self.Codec.Decode(data, &value)
+//		if err != nil {
+//			return err
+//		}
+//		return nil
+//	}
+//}

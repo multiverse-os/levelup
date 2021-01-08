@@ -2,6 +2,7 @@ package levelup
 
 import (
 	"fmt"
+	"regexp"
 
 	id "github.com/multiverse-os/levelup/id"
 )
@@ -12,6 +13,10 @@ type key struct {
 
 	Subset id.Id
 	Record id.Id
+}
+
+func IsValidKey(k string) (bool, error) {
+	return regexp.MatchString(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{1,255}$`, k)
 }
 
 ////////////////////////////////////////////////////////////////////////////////

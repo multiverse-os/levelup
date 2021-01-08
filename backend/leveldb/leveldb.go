@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"sync"
 
-	errors "github.com/multiverse-os/levelup/errors"
-
 	leveldb "github.com/syndtr/goleveldb/leveldb"
 	filter "github.com/syndtr/goleveldb/leveldb/filter"
 	iterator "github.com/syndtr/goleveldb/leveldb/iterator"
@@ -179,7 +177,7 @@ func (self Database) Get(key []byte) ([]byte, error) {
 
 func (self Database) Set(key []byte, value []byte) error {
 	if len(key) == 0 {
-		return errors.ErrEmptyKey
+		return ErrEmptyKey
 	} else if len(value) == 0 {
 		return self.Store.Delete(key, nil)
 	} else {
@@ -242,7 +240,7 @@ func (self Database) Snapshot() (map[string][]byte, error) {
 //func (self Database) Snapshot() *Snapshot {
 //	ss := self.Store.NewSnapshot()
 //	if ss == nil {
-//		return &Snapshot{err: errors.ErrDBClosed}
+//		return &Snapshot{err: ErrDBClosed}
 //	}
 //	return newSnapshot(ss)
 //}

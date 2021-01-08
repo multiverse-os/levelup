@@ -1,0 +1,3 @@
+[submodule "bsonid"]
+	path = bsonid
+  url = https://github.com/multiverse-os/bsonid

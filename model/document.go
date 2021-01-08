@@ -1,7 +1,7 @@
 package model
 
 type Document struct {
-	Collection *Collection
+	CollectionId uint32
 
 	Id    []byte
 	Name  string

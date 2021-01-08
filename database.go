@@ -3,7 +3,10 @@ package levelup
 import (
 	"sync"
 
-	leveldb "github.com/multiverse-os/levelup/backend"
+	backend "github.com/multiverse-os/levelup/backend"
+	history "github.com/multiverse-os/levelup/history"
+	id "github.com/multiverse-os/levelup/id"
+	model "github.com/multiverse-os/levelup/model"
 
 	codec "github.com/multiverse-os/codec"
 	checksum "github.com/multiverse-os/codec/checksum"
@@ -27,38 +30,43 @@ import (
 //       heavy reads. This is just a first draft, next draft will likely use a
 //       different KVdb we have been working on.
 type Database struct {
-	Storage *leveldb.Storage
-	Access  sync.RWMutex
-	Codec   codec.Codec
+	storage backend.Storage
 
-	Collections     map[int64]*model.Collection
-	CollectionCount int
+	Access sync.RWMutex
+	Codec  codec.Codec
 
+	Collections map[uint32]*Collection
 	Records     map[int64]*model.Record
-	RecordCount int
+	Logs        []*history.Log
+}
 
-	Logs     []*Log
-	LogCount int
+////////////////////////////////////////////////////////////////////////////////
+func (self *Database) NewCollection(name string) *Collection {
+	collection := &Collection{
+		Id:       id.Hash(name),
+		Database: self,
+		Name:     name,
+	}
+	self.Collections[collection.Id.UInt32()] = collection
+	return collection
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 func Open(path string) (*Database, error) {
-	if db, err := leveldb.Open(leveldb.FileStore, path); err != nil {
+	if db, err := backend.DatabaseFile(path); err != nil {
 		return nil, err
 	} else {
 		return &Database{
-			Storage: db,
-			Access:  make(sync.RWMutex),
-			Codec:   codec.EncodingFormat(encoding.BSON).ChecksumAlgorithm(checksum.XXH64),
-
-			Collections:     make(map[int64]*model.Collection),
-			CollectionCount: 0,
-
+			// Private
+			// NOTE: We want this to be private so we can control access at a
+			// bottleneck letting us base the GET/PUT/DELETE functionality on the key
+			// used in the request.
+			storage: db,
+			// Public
+			Codec:       codec.EncodingFormat(encoding.BSON).ChecksumAlgorithm(checksum.XXH64),
+			Collections: make(map[uint32]*Collection),
 			Records:     make(map[int64]*model.Record),
-			RecordCount: 0,
-
-			Logs:     make([]*Log),
-			LogCount: 0,
+			Logs:        []*history.Log{},
 		}, nil
 
 		// TODO: Scan existing database, and load it into READ CACHE.
@@ -67,7 +75,10 @@ func Open(path string) (*Database, error) {
 
 ////////////////////////////////////////////////////////////////////////////////
 func (self *Database) Close() {
-	self.Storage.Close()
+	self.storage.Close()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+func (self *Database) Collection(name string) *Collection {
+	return self.Collections[id.Hash(name).UInt32()]
+}

@@ -8,18 +8,10 @@ import (
 	util "github.com/syndtr/goleveldb/leveldb/util"
 )
 
-type StorageType int
-
-const (
-	File StorageType = iota
-	Memory
-)
-
 ////////////////////////////////////////////////////////////////////////////////
-type Backend interface {
+type Storage interface {
 	// Information & Statistics
 	Name() string
-	Storage() string
 
 	//Collections() []*collection.Collection
 
@@ -46,13 +38,6 @@ type Backend interface {
 	NewIterator(iteratorRange *util.Range, options *opt.ReadOptions) iterator.Iterator
 }
 
-func Open(storageType StorageType, path string) (Backend, error) {
-	switch storageType {
-	case File:
-		return leveldb.FileStorage(path)
-	case Memory:
-		return leveldb.MemoryStorage()
-	default:
-		panic("invalid database")
-	}
-}
+func DatabaseFile(path string) (Storage, error) { return leveldb.FileStorage(path) }
+
+//func Memory() (Storage, error)                  { return Storage{}, nil }

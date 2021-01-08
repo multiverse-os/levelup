@@ -1,9 +1,9 @@
-package database
+package history
 
 import (
 	"time"
 
-	"github.com/multiverse-os/levelup/database/model"
+	model "github.com/multiverse-os/levelup/model"
 )
 
 type LogType int
@@ -18,9 +18,7 @@ const (
 type Log struct {
 	CreatedAt time.Time
 
-	Database   *Database
-	Collection *Collection
-	Record     *model.Record
+	Record *model.Record
 
 	Type LogType
 }

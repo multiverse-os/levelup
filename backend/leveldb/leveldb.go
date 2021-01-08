@@ -100,7 +100,7 @@ func (self Database) Storage() string {
 
 ////////////////////////////////////////////////////////////////////////////////
 func MemoryStorage() (database Database, err error) {
-
+	return Database{}, fmt.Errorf("memory databse not yet implemented")
 }
 
 func FileStorage(path string) (database Database, err error) {
@@ -154,7 +154,8 @@ func FileStorage(path string) (database Database, err error) {
 
 	//go database.UpdateLoop()
 
-	runtime.SetFinalizer(database, (Database).finalize)
+	// TODO: Read up more on finalizers
+	// runtime.SetFinalizer(database, (Database).finalize)
 	return database, err
 }
 

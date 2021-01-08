@@ -1,24 +1,19 @@
 package levelup
 
-import (
-	validations "github.com/multiverse-os/levelup/model/validations"
-)
-
 ////////////////////////////////////////////////////////////////////////////////
-func (self *Database) Put(key string, value []byte) error {
-	if validations.NotEmpty(key) {
-		return self.Storage.Set(Key(key).Bytes(), value)
-	}
+// TODO: Here we will take the key and modify the set get or delete based on,
+//       the key type, we need to ensure all put/get/delete goes through here
+//       so that the the bottleneck is here, and the key checking cna happen
+//       here. This will enable us to support the variety of key types we want
+//       such as CACHE, IMMUTABLE, DOCUMENT, BYTES, SPECIAL keys.
+func (self *Database) Put(k key, value []byte) error {
+	return self.storage.Set(k.Bytes(), value)
 }
 
-func (self *Database) Get(key string) ([]byte, error) {
-	if validations.NotEmpty(key) {
-		return self.Storage.Get(Key(key).Bytes())
-	}
+func (self *Database) Get(k key) ([]byte, error) {
+	return self.storage.Get(k.Bytes())
 }
 
-func (self *Database) Delete(key string) error {
-	if validations.NotEmpty(key) {
-		return self.Storage.Delete(Key(key).Bytes())
-	}
+func (self *Database) Delete(k key) error {
+	return self.storage.Delete(k.Bytes())
 }

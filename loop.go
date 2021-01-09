@@ -18,11 +18,11 @@ func (self Database) WriteLoop() {
 
 		case <-self.update:
 			// Section headers completed (or rolled back), update the index
-			self.Access.Lock()
+			self.Lock()
 			if time.Since(updated) > 8*time.Second {
 				updated = time.Now()
 			}
-			self.Access.Unlock()
+			self.Unlock()
 			if err != nil {
 				select {
 				case <-self.ctx.Done():
@@ -31,7 +31,7 @@ func (self Database) WriteLoop() {
 				default:
 				}
 			}
-			self.Access.Lock()
+			self.Lock()
 
 			// If processing succeeded and no reorgs occurred, mark the section completed
 			if err == nil {
@@ -49,6 +49,6 @@ func (self Database) WriteLoop() {
 				}
 			})
 		}
-		self.Access.Unlock()
+		self.Unlock()
 	}
 }

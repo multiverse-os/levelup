@@ -1,24 +1,35 @@
-package history
+package levelup
 
 import (
 	"time"
-
-	model "github.com/multiverse-os/levelup/model"
 )
 
-type LogType int
+type ActionType int
 
 const (
-	Create LogType = iota
-	Update
-	Delete
-	Cache
+	CREATE ActionType = iota
+	UPDATE
+	DELETE
+)
+
+type ActionSubject int
+
+const (
+	DATABASE ActionSubject = iota
+	COLLECTION
+	RECORD
 )
 
 type ActionLog struct {
 	CreatedAt time.Time
 
-	Record *model.Record
+	Database   *Database
+	Collection *Collection
+	Record     *Record
 
-	Type LogType
+	Action  ActionType
+	Subject ActionSubject
+	// TODO: Not only will this provide our desired rewinding functionality; it
+	// will allow us to filter for creates on things like collections and records,
+	// and rebuild the database on load in the read only cache form.
 }

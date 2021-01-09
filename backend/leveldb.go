@@ -1,10 +1,13 @@
-package leveldb
+package backend
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	leveldb "github.com/syndtr/goleveldb/leveldb"
+	errors "github.com/syndtr/goleveldb/leveldb/errors"
 	filter "github.com/syndtr/goleveldb/leveldb/filter"
 	iterator "github.com/syndtr/goleveldb/leveldb/iterator"
 	opt "github.com/syndtr/goleveldb/leveldb/opt"
@@ -12,43 +15,35 @@ import (
 )
 
 ////////////////////////////////////////////////////////////////////////////////
-type StorageType int
+type Type int
 
 const (
-	File StorageType = iota
+	File Type = iota
+	Archive
 	Memory
 )
 
-func (self StorageType) String() string {
-	switch self {
-	case File:
-		return "file://"
-	case Memory:
-		return "memory://"
-	default:
-		return ""
-	}
+type Storage struct {
+	Type  Type
+	Path  string
+	Files []string
 }
 
-// NOTE: Used to sign updates, and encrypt the database when at rest. The
-// database can use this in combination with a Model.Field to encrypt the
-// entire model. This allows user data to be encrypted with the combination
-// of a system key and a user key when at rest. The system key ideally will
-// remain cold, and never be on the production server. It simply will send a
-// session certificate over to the server which is valid for the process
-// lifetime. This is done by decrypting the data and renecrypting it to the
-// session key, and when closing, decryping from the session key and
-// re-encrypting back to the root key. This allows the data to be stored at
-// rest with a key that is never present on the production server.
+////////////////////////////////////////////////////////////////////////////////
+type Database struct {
+	sync.Mutex
+	Type Type
 
-//func GenerateSessionKey(rootKey []byte) []byte {
-//	// TODO: Use codec.Crypto argon2
-//	return argon2.Key([]byte(rootKey), salt, 3, 32*1024, 4, 32)
-//}
+	Store *leveldb.DB
+	Batch *leveldb.Batch
 
+	PersistentStorage Storage
+
+	Options Options
+}
+
+////////////////////////////////////////////////////////////////////////////////
 type Options struct {
-	Storage   StorageType
-	Path      string
 	ReadOnly  bool
 	WriteOnly bool
 
@@ -57,22 +52,91 @@ type Options struct {
 	Write   *opt.WriteOptions
 }
 
-type Database struct {
-	Store *leveldb.DB
+////////////////////////////////////////////////////////////////////////////////
+// NOTE: In our implementation we are going to keep all the database files in
+//       in a *.tar archive. Then by doing modifications to the tar file, we
+//       will make our changes.
+//       This new storage technique will include diff patches, regular snapshots
+//       after x amount of data has been changed, and several iterations of
+//       the database within the tar file. We could also use this to have a
+//       a read-only version and a write version in the same tar.
+//       Writes could be creating the diff-files, then the diff patches can be
+//       applied after x amount have been built up.
+//
+//       **[Key concepts]**
+//
+//         1) Guarantee atomicity
+//
+//         2) Archive to keep all files, replicated versions (for speed, think
+//            RAID), iterations, diffs, in a single file.
+//
+//         3) Add another level of compression possibly at rest.
+//
+//         4) At rest encryption with root-key, and re-encrypt. By having
+//            replications, it may be possible to decrypt parts of the db,
+//            either way it could be encrypted to the session key.
+//
+//         5) Store all public keys, information for backing up, git data, etc.
+//
+//
+////////////////////////////////////////////////////////////////////////////////
 
-	Options Options
-	Access  sync.Mutex
-	// TODO: Ability to Subscribe to changes
-	// TODO: Hooks on GET, SET, DELETE actions
-}
+//type FileStorage struct {
+//	Path string
+//
+//	// TODO: tar.zstd !
+//	// TODO: Store cryptokeysm identify owners
+//
+//	// TODO: Digest file=> signed could have things like who can write,
+//	//                     what is the root key, recovery key,
+//	//                     active session key (when it expires)
+//
+//	//
+//
+//	Archive *tar.Writer
+//	Files   []string
+//}
+
+//func (self FileStorage) ParseFiles() {
+//
+//}
+//
+//func (self FileStorage) CreateArchive() ([]byte, error) {
+//
+//}
+//
+//func (self FileStorage) AddFile(path string) error {
+//	file, err := os.Open(path)
+//	if err != nil {
+//		return err
+//	}
+//	defer file.Close()
+//	if stat, err := file.Stat(); err == nil {
+//		// now lets create the header as needed for this file within the tarball
+//		header := new(tar.Header)
+//		header.Name = path
+//		header.Size = stat.Size()
+//		header.Mode = int64(stat.Mode())
+//		header.ModTime = stat.ModTime()
+//		// write the header to the tarball archive
+//		if err := tw.WriteHeader(header); err != nil {
+//			return err
+//		}
+//		// copy the file data to the tarball
+//		if _, err := io.Copy(tw, file); err != nil {
+//			return err
+//		}
+//	}
+//	return nil
+//}
+//
+//func (self FileStorage) DeleteFiles() error {
+//	return os.RemoveAll(self.Path)
+//}
 
 ////////////////////////////////////////////////////////////////////////////////
 func (Database) Name() string {
 	return "leveldb"
-}
-
-func (self Database) Storage() string {
-	return self.Options.Storage.String()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -92,6 +156,11 @@ func FileStorage(path string) (database Database, err error) {
 				Filter:                        filter.NewBloomFilter(10),
 				CompactionTotalSizeMultiplier: 20,
 				BlockCacheCapacity:            0,
+				WriteL0SlowdownTrigger:        16,
+				WriteL0PauseTrigger:           64,
+				// NOTE: This affects how we build code in this file.
+				ErrorIfMissing: false,
+				ErrorIfExist:   false,
 				// TODO: Can use this to specify a virtual filesystem for greater
 				//       security.
 				// Comparator: nil,
@@ -106,7 +175,17 @@ func FileStorage(path string) (database Database, err error) {
 			},
 		},
 	}
+
+	_ = os.MkdirAll(filepath.Clean(path), 0750)
+
+	//////////////////////////////////////////////////////////////////////////////
+	// Repairs Database                                                         //
+	// rdb, err := leveldb.RecoverFile(db.path, db.opts);                       //
+	//////////////////////////////////////////////////////////////////////////////
 	database.Store, err = leveldb.OpenFile(path, database.Options.Runtime)
+	if _, corrupted := err.(*errors.ErrCorrupted); corrupted {
+		database.Store, err = leveldb.RecoverFile(path, nil)
+	}
 
 	// TODO: Read up more on finalizers
 	// runtime.SetFinalizer(database, (Database).finalize)
@@ -215,8 +294,8 @@ func (self Database) WriteBatch(data map[string][]byte) error {
 ////////////////////////////////////////////////////////////////////////////////
 
 func (self Database) Snapshot() (map[string][]byte, error) {
-	self.Access.Lock()
-	defer self.Access.Unlock()
+	self.Lock()
+	defer self.Unlock()
 
 	snap, err := self.Store.GetSnapshot()
 	if err != nil {

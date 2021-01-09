@@ -4,7 +4,6 @@ import (
 	"time"
 
 	id "github.com/multiverse-os/levelup/id"
-	model "github.com/multiverse-os/levelup/model"
 )
 
 type Collection struct {
@@ -15,14 +14,14 @@ type Collection struct {
 	Type KeyType
 	Name string
 
-	Records      map[int64]*model.Record
+	Records      map[uint32]*Record
 	Size         int
 	LastUpdateAt time.Time
 
 	//Relationships []*collection.Relationships
 }
 
-func (self Collection) Key(recordKey string) key { return Document(self.Name).Key(recordKey) }
+func (self Collection) Key(recordKey string) Key { return Document(self.Name).Key(recordKey) }
 
 ////////////////////////////////////////////////////////////////////////////////
 // TODO: Direct get/put/delete access on collection

@@ -1,0 +1,7 @@
+codec: 
+  encoding: "bson"
+  compression: "zstd"
+collections:
+  - name: "host"
+  - name: "client"
+

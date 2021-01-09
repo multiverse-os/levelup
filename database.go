@@ -8,17 +8,34 @@ import (
 	"time"
 
 	backend "github.com/multiverse-os/levelup/backend"
-	history "github.com/multiverse-os/levelup/history"
 	id "github.com/multiverse-os/levelup/id"
-	model "github.com/multiverse-os/levelup/model"
 
 	codec "github.com/multiverse-os/codec"
 	checksum "github.com/multiverse-os/codec/checksum"
 	encoding "github.com/multiverse-os/codec/encoding"
 )
 
+type Storage interface {
+	Get(key Key)
+
+	// TODO: Here we will setup our ability to define Hooks:
+	//        (BeforeGet, AfterGet)
+	//        (BeforeSet, AfterSet)
+	//        (BeforeDelete, AfterDelete)
+
+	// TODO: This will also allow us to maintain multiple databases, we can load
+	// a single database specifically for writing. Then take have a saprately
+	// stored location for a immutable database.
+	OnReject() func(record *Record)
+}
+
 type Database struct {
-	storage backend.Storage
+	sync.RWMutex
+
+	// TODO: Eventaully this will be back to backend.Storage
+	//       because we will be support file storage backed database, memory,
+	//       and our abstracted custom archive style.
+	storage backend.Database
 
 	Codec codec.Codec
 
@@ -33,13 +50,15 @@ type Database struct {
 	// TODO: This mutex is primarily used, hwen updating the caches, or grabbing
 	// reads. This should allow our database to avoid race conditions. But this
 	// will obviously need heavy heavy testing.
-	Access      sync.RWMutex
 	Collections map[uint32]*Collection
-	Records     map[int64]*model.Record
+
+	// TODO: Consider using a sync.pool or sync.map OR perhaps better; taking
+	// sync.pool and modifying it for our custom read cache.
+	Records map[uint32]*Record
 	// NOTE: These are intended to be more than just logs, but rather a history of
 	// every WRITE ACTION (_CREATE, _UPDATE, _DELETE), so that can specifically
 	// rewind the database.
-	ActionLogs []*history.ActionLog
+	History []*ActionLog
 }
 
 // TODO: Add the ability to rewind the database using action logs, to step
@@ -71,6 +90,7 @@ func (self *Database) NewCollection(name string) *Collection {
 		Id:       id.Hash(name),
 		Database: self,
 		Name:     name,
+		Records:  make(map[uint32]*Record),
 	}
 	self.Collections[collection.Id.UInt32()] = collection
 	return collection
@@ -82,7 +102,7 @@ func (self *Database) Collection(name string) *Collection {
 
 ////////////////////////////////////////////////////////////////////////////////
 func Open(path string) (*Database, error) {
-	if db, err := backend.DatabaseFile(path); err != nil {
+	if db, err := backend.FileStorage(path); err != nil {
 		return nil, err
 	} else {
 
@@ -99,8 +119,8 @@ func Open(path string) (*Database, error) {
 			// Public
 			Codec:       codec.EncodingFormat(encoding.BSON).ChecksumAlgorithm(checksum.XXH64),
 			Collections: make(map[uint32]*Collection),
-			Records:     make(map[int64]*model.Record),
-			ActionLogs:  []*history.ActionLog{},
+			Records:     make(map[uint32]*Record),
+			History:     []*ActionLog{},
 		}
 		database.ctx, database.ctxCancel = context.WithCancel(context.Background())
 
@@ -140,7 +160,7 @@ func (self *Database) Close() error {
 	}
 
 	err := self.storage.Close()
-	self.storage = nil
 	self.storage.Close()
+	self = nil
 	return err
 }

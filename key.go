@@ -8,7 +8,10 @@ import (
 )
 
 ////////////////////////////////////////////////////////////////////////////////
-type key struct {
+type Key struct {
+	Database   *Database
+	Collection *Collection
+
 	Type KeyType
 
 	Subset id.Id
@@ -25,6 +28,7 @@ type KeyType int
 const (
 	bytesKey KeyType = iota
 	specialKey
+	indexKey
 	documentKey
 	immutableKey
 	cacheKey
@@ -35,6 +39,8 @@ func (self KeyType) String() string {
 	switch self {
 	case documentKey:
 		return "d"
+	case indexKey:
+		return "x"
 	case immutableKey:
 		return "i"
 	case cacheKey:
@@ -51,56 +57,63 @@ func (self KeyType) String() string {
 func (self KeyType) Bytes() []byte { return []byte(self.String()) }
 
 ////////////////////////////////////////////////////////////////////////////////
-//func Key(t KeyType) key {
-//	return key{
+//func Key(t KeyType) Key {
+//	return Key{
 //		Type: standardKey,
 //	}
 //}
 ////////////////////////////////////////////////////////////////////////////////
 
-func Document(subsetName string) key {
-	return key{
+func Document(subsetName string) Key {
+	return Key{
 		Type:   documentKey,
 		Subset: id.Hash(subsetName),
 	}
 }
 
-func ValueBucket(subsetName string) key {
-	return key{
+func ValueBucket(subsetName string) Key {
+	return Key{
 		Type:   bytesKey,
 		Subset: id.Hash(subsetName),
 	}
 }
 
-func Special(subsetName string) key {
-	return key{
+func Special(subsetName string) Key {
+	return Key{
 		Type:   specialKey,
 		Subset: id.Hash(subsetName),
 	}
 }
 
-func Cache(subsetName string) key {
-	return key{
+func Index(subsetName string) Key {
+	return Key{
+		Type:   indexKey,
+		Subset: id.Hash(subsetName),
+	}
+}
+
+func Cache(subsetName string) Key {
+	return Key{
 		Type:   cacheKey,
 		Subset: id.Hash(subsetName),
 	}
 }
 
-func Immutable(subsetName string) key {
-	return key{
+func Immutable(subsetName string) Key {
+	return Key{
 		Type:   immutableKey,
 		Subset: id.Hash(subsetName),
 	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-func (self key) Key(recordName string) key {
+func (self Key) Key(recordName string) Key {
 	self.Record = id.Hash(recordName)
 	return self
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-func (self key) Bytes() []byte {
+func (self Key) Bytes() []byte {
 	switch self.Type {
 	case documentKey:
 		return id.Hash(fmt.Sprintf("%s.%s.%s", self.Type.Bytes(), self.Subset.Bytes(), self.Record.Bytes())).Bytes()

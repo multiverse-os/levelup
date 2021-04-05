@@ -1,54 +1,154 @@
 package levelup
 
-import "time"
+import (
+	"net"
+	"sync"
+	"time"
+)
 
-func (self Database) WriteLoop() {
-	var (
-		updating bool
-		updated  time.Time
-		err      error
-	)
-
-	for {
-		select {
-		case errc := <-self.quit:
-			// Chain indexer terminating, report no failure and abort
-			errc <- nil
-			return
-
-		case <-self.update:
-			// Section headers completed (or rolled back), update the index
-			self.Lock()
-			if time.Since(updated) > 8*time.Second {
-				updated = time.Now()
-			}
-			self.Unlock()
-			if err != nil {
-				select {
-				case <-self.ctx.Done():
-					<-self.quit <- nil
-					return
-				default:
-				}
-			}
-			self.Lock()
-
-			// If processing succeeded and no reorgs occurred, mark the section completed
-			if err == nil {
-				if updating {
-					updating = false
-				}
-			} else {
-				// If processing failed, don't retry until further notification
-			}
-			// If there are still further sections to process, reschedule
-			time.AfterFunc(self.throttle, func() {
-				select {
-				case self.update <- struct{}{}:
-				default:
-				}
-			})
+func (self Database) UpdateLoop() {
+	self.Events.Writing = func(self Database) (event Event) {
+		if self.IsActive {
+			self.Unload()
 		}
-		self.Unlock()
+
+		var lastTick time.Time
+		var delay time.Duration = -1
+		if events.Tick != nil {
+			delay = 0
+		}
+
+		if events.Tick != nil {
+			now := time.Now()
+			if now.Sub(lastTick) > delay {
+				var action Action
+				lastTick = now
+				delay, action = events.Tick(now)
+				if delay < 0 {
+					delay = 0
+				}
+				if action == Shutdown {
+					return nil
+				}
+			}
+		}
+
+		go func() {
+			c, err := net.Dial("tcp", addr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			var data [64]byte
+			n, _ := c.Read(data[:])
+			if string(data[:n]) != "HI THERE" {
+				t.Fatalf("expected '%s', got '%s'", " THERE", data[:n])
+			}
+			c.Write([]byte("HELLO"))
+			n, _ = c.Read(data[:])
+			if string(data[:n]) != "HELLO" {
+				t.Fatalf("expected '%s', got '%s'", "HELLO", data[:n])
+			}
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				c, err := net.Dial("tcp", addr)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer c.Close()
+				var data [64]byte
+				n, _ := c.Read(data[:])
+				if string(data[:n]) != "HI THERE" {
+					t.Fatalf("expected '%s', got '%s'", " THERE", data[:n])
+				}
+				n, _ = c.Read(data[:])
+				if string(data[:n]) != "HERE" {
+					t.Fatalf("expected '%s', got '%s'", "HERE", data[:n])
+				}
+				n, _ = c.Read(data[:])
+				if n != 0 {
+					t.Fatalf("expected zero")
+				}
+				// add 15 connections
+				for i := 0; i < 15; i++ {
+					net.Dial("tcp", addr)
+				}
+
+			}()
+			wg.Wait()
+
+			c.Write([]byte("SHUTDOWN"))
+			n, _ = c.Read(data[:])
+			if string(data[:n]) != "GOOD BYE" {
+				t.Fatalf("expected '%s', got '%s'", "GOOD BYE", data[:n])
+			}
+		}()
+		return
 	}
+	preWriteCount := 0
+	events.PreWrite = func() {
+		preWriteCount++
+	}
+	var c2 Conn
+	var max int
+	events.Opened = func(c Conn) (out []byte, action Action) {
+		if c.LocalAddr().String() == "" {
+			t.Fatal("should not be empty")
+		}
+		if c.RemoteAddr().String() == "" {
+			t.Fatal("should not be empty")
+		}
+		max++
+		opened++
+		if opened == 2 {
+			c2 = c
+		}
+		return []byte("HI THERE"), None
+	}
+	events.Closed = func(c Conn) (action Action) {
+		opened--
+		return
+	}
+	events.Data = func(c Conn, in []byte) (out []byte, action Action) {
+		if string(in) == "SHUTDOWN" {
+			return []byte("GOOD BYE"), Shutdown
+		}
+		return in, None
+	}
+	numTicks := 0
+	var c2n int
+	events.Tick = func(now time.Time) (delay time.Duration, action Action) {
+		numTicks++
+		if numTicks == 1 {
+			return -10, None
+		}
+		delay = time.Second / 10
+		if c2 != nil {
+			if c2n == 0 {
+				c2.Write([]byte("HERE"))
+			} else if c2n == 1 {
+				c2.Close()
+				c2 = nil
+			}
+			c2n++
+		}
+		return
+	}
+	if err := Serve(events, "tcp://"+addr); err != nil {
+		t.Fatal(err)
+	}
+	if preWriteCount == 0 {
+		t.Fatal("expected preWrites")
+	}
+	if opened != 0 {
+		t.Fatal("expected zero")
+	}
+	if max != 17 {
+		t.Fatalf("expected 17, got %v", max)
+	}
+	// should not cause problems
+	c2.Write(nil)
+	c2.Close()
 }

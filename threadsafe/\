@@ -1,0 +1,69 @@
+package threadsafe
+
+import "sync/atomic"
+
+type Boolean uint32
+
+func Switch() Boolean {
+	return *new(Boolean)
+}
+
+func (self Boolean) On() {
+	atomic.StoreUint32((*uint32)(&self), 1)
+}
+
+// UnSet sets the Boolean to false.
+func (self Boolean) UnSet() {
+	atomic.StoreUint32((*uint32)(&self), 0)
+}
+
+// IsSet returns whether the Boolean is true.
+func (self Boolean) IsSet() bool {
+	return atomic.LoadUint32((*int32)(ab))&1 == 1
+}
+
+// IsNotSet returns whether the Boolean is false.
+func (ab *AtomicBool) IsNotSet() bool {
+	return !ab.IsSet()
+}
+
+// SetTo sets the boolean with given Boolean.
+func (ab *AtomicBool) SetTo(yes bool) {
+	if yes {
+		atomic.StoreInt32((*int32)(ab), 1)
+	} else {
+		atomic.StoreInt32((*int32)(ab), 0)
+	}
+}
+
+// Toggle inverts the Boolean then returns the value before inverting.
+func (ab *AtomicBool) Toggle() bool {
+	return atomic.AddInt32((*int32)(ab), 1)&1 == 0
+}
+
+// SetToIf sets the Boolean to new only if the Boolean matches the old.
+// Returns whether the set was done.
+func (ab *AtomicBool) SetToIf(old, new bool) (set bool) {
+	var o, n int32
+	if old {
+		o = 1
+	}
+	if new {
+		n = 1
+	}
+	return atomic.CompareAndSwapInt32((*int32)(ab), o, n)
+}
+
+func boolToUint32(val bool) uint32 {
+	if val {
+		return 1
+	}
+	return 0
+}
+
+func uint32ToBool(val uint32) bool {
+	if val > 0 {
+		return true
+	}
+	return false
+}

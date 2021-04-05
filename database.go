@@ -1,20 +1,24 @@
 package levelup
 
-import (
-	"context"
-	"fmt"
-	"sync"
-	"sync/atomic"
-	"time"
+// TODO[IMPORTANT]: Basically make everything private, then use the database,
+// and slowly only make the things public that we are using.
+// TODO: Do benchmarking and if we receive difference using bool and uint8 on
+// our enumerators.
 
-	backend "github.com/multiverse-os/levelup/backend"
-	id "github.com/multiverse-os/levelup/id"
+import (
+	"sync"
+
+	"time"
 
 	codec "github.com/multiverse-os/codec"
 	checksum "github.com/multiverse-os/codec/checksum"
 	encoding "github.com/multiverse-os/codec/encoding"
+	backend "github.com/multiverse-os/levelup/backend"
+	id "github.com/multiverse-os/levelup/id"
+	threadsafe "github.com/multiverse-os/levelup/threadsafe"
 )
 
+// TODO: Combine this into our events object
 type Storage interface {
 	Get(key Key)
 
@@ -31,63 +35,27 @@ type Storage interface {
 
 type Database struct {
 	sync.RWMutex
+	Throttle time.Duration // Disk write throttling
+	Active   threadsafe.Boolean
+	Events   Events
 
-	// TODO: Eventaully this will be back to backend.Storage
-	//       because we will be support file storage backed database, memory,
-	//       and our abstracted custom archive style.
+	// TODO: Now implement a buffered channel to control and throttle writes
+
 	storage backend.Database
+	Codec   codec.Codec
 
-	Codec codec.Codec
-
-	throttle time.Duration // Disk throttling to prevent a heavy upgrade from hogging resources
-	active   uint32        // Flag whether the event loop was started
-
-	update    chan struct{}   // Notification channel that headers should be processed
-	quit      chan chan error // Quit channel to tear down running goroutines
-	ctx       context.Context
-	ctxCancel func()
-
-	// TODO: This mutex is primarily used, hwen updating the caches, or grabbing
-	// reads. This should allow our database to avoid race conditions. But this
-	// will obviously need heavy heavy testing.
 	Collections map[uint32]*Collection
-
-	// TODO: Consider using a sync.pool or sync.map OR perhaps better; taking
-	// sync.pool and modifying it for our custom read cache.
-	Records map[uint32]*Record
-	// NOTE: These are intended to be more than just logs, but rather a history of
-	// every WRITE ACTION (_CREATE, _UPDATE, _DELETE), so that can specifically
-	// rewind the database.
-	History []*ActionLog
+	Records     map[uint32]*Record
 }
 
-// TODO: Add the ability to rewind the database using action logs, to step
-// backwards.
-
-// TODO: Use a buffered channel to submit all writes, so that that only a single
-// write operation is capable of happening at any time. USE TRANSACTIONS OR ADD
-// TRANSACTION SUPPORT.
-// READ operations should NEVER hit the actual database, we load the the
-// database from the file into memory, and reads only interact with this
-// memory database. Changes to the cache where reads come from, happen after
-// a buffered write comes down the channel, succeeds, then causes the update to
-// the cache.
-// This means that the only interactions with the database are write actions--
-// controlled by a buffered channel and a mutex.
-// This should allow for A LOT of write actions to occur, since we are not
-// doing any reads from the disk io, we are doing all the reads from the
-// memory IO.
-
-// After this is successful, we want to abstract ontop of the cached memory
-// database a graph database built using buckets, or maps, of relationships.
-// These relationships are stored separatedly in a differnet database file.
-// These relationships, do not change any data in the objects, they just store
-// data baout how obgjects are related.
+// TODO: A database Loader to get everything read from the logs into cache and
+// get ready for writing is separate from the Writer function under events
 
 ////////////////////////////////////////////////////////////////////////////////
-func (self *Database) NewCollection(name string) *Collection {
+func (self Database) NewCollection(name string) *Collection {
 	collection := &Collection{
 		Id:       id.Hash(name),
+		Active:   threadsafe.Switch().Off(),
 		Database: self,
 		Name:     name,
 		Records:  make(map[uint32]*Record),
@@ -107,58 +75,20 @@ func Open(path string) (*Database, error) {
 	} else {
 
 		database := &Database{
-			// Private
-			// NOTE: We want this to be private so we can control access at a
-			// bottleneck letting us base the GET/PUT/DELETE functionality on the key
-			// used in the request.
-			storage: db,
-
-			update: make(chan struct{}, 1),
-			quit:   make(chan chan error),
-
-			// Public
+			storage:     db,
 			Codec:       codec.EncodingFormat(encoding.BSON).ChecksumAlgorithm(checksum.XXH64),
 			Collections: make(map[uint32]*Collection),
 			Records:     make(map[uint32]*Record),
-			History:     []*ActionLog{},
+			Events:      []*Event{},
 		}
-		database.ctx, database.ctxCancel = context.WithCancel(context.Background())
 
-		//go database.UpdateLoop()
+		// TODO: HERE IS WHERE WE WOULD NORMALLY DO OUR
+		//   GO FUNC BASED UPDATE LOOP ON A BUFFERED CHANNEL
 		return database, nil
-
-		// TODO: Scan existing database, and load it into READ CACHE.
 	}
 }
 
 func (self *Database) Close() error {
-	var errs []error
-
-	self.ctxCancel()
-
-	//// Tear down the primary update loop
-	errc := make(chan error)
-	self.quit <- errc
-	if err := <-errc; err != nil {
-		errs = append(errs, err)
-	}
-	//// If needed, tear down the secondary event loop
-	if atomic.LoadUint32(&self.active) != 0 {
-		self.quit <- errc
-		if err := <-errc; err != nil {
-			errs = append(errs, err)
-		}
-	}
-	//// Return any failures
-	switch len(errs) {
-	case 0:
-		return nil
-	case 1:
-		return errs[0]
-	default:
-		return fmt.Errorf("%v", errs)
-	}
-
 	err := self.storage.Close()
 	self.storage.Close()
 	self = nil

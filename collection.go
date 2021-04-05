@@ -7,7 +7,7 @@ import (
 )
 
 type Collection struct {
-	Database *Database
+	Database Database
 
 	Id id.Id
 
